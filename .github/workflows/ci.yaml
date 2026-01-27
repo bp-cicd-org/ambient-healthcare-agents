@@ -263,9 +263,10 @@ jobs:
           echo "========================================"
           
           MAX_ATTEMPTS=180
-          ATTEMPT=0
+          FAILED=0
           
           # Wait for UI (port 5173)
+          ATTEMPT=0
           echo "Checking UI service (http://localhost:5173)..."
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
@@ -276,6 +277,10 @@ jobs:
             [ $((ATTEMPT % 10)) -eq 0 ] && echo "  Waiting... ($ATTEMPT/$MAX_ATTEMPTS)"
             sleep 2
           done
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "✗ ERROR: UI service failed to start (timeout)"
+            FAILED=1
+          fi
           
           # Wait for Riva NIM to be healthy
           ATTEMPT=0
@@ -290,6 +295,11 @@ jobs:
             [ $((ATTEMPT % 10)) -eq 0 ] && echo "  Riva Status: $STATUS ($ATTEMPT/$MAX_ATTEMPTS)"
             sleep 2
           done
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "✗ ERROR: Riva NIM failed to become healthy (timeout)"
+            docker logs --tail 50 parakeet-1-1b-ctc-en-us 2>&1 || true
+            FAILED=1
+          fi
           
           # Wait for LLM NIM to be healthy
           ATTEMPT=0
@@ -304,10 +314,24 @@ jobs:
             [ $((ATTEMPT % 10)) -eq 0 ] && echo "  LLM Status: $STATUS ($ATTEMPT/$MAX_ATTEMPTS)"
             sleep 2
           done
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "✗ ERROR: LLM NIM failed to become healthy (timeout)"
+            docker logs --tail 50 llama-3.3-nemotron-super-49b-v1 2>&1 || true
+            FAILED=1
+          fi
           
           echo ""
           echo "Final container status:"
           docker ps -a --format "table {{.Names}}\t{{.Status}}"
+          
+          if [ $FAILED -eq 1 ]; then
+            echo ""
+            echo "✗ SERVICES FAILED TO START - ABORTING"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ ALL SERVICES READY"
 
       # ==========================================
       # PHASE 4: Run pytest UI Tests
@@ -470,16 +494,21 @@ jobs:
           sleep 30
           docker ps --format "table {{.Names}}\t{{.Status}}"
 
-      - name: Deploy App Server
+      - name: Deploy App Server and Full Agent UI
         run: |
           echo "========================================"
-          echo "  DEPLOYING APP SERVER"
+          echo "  DEPLOYING APP SERVER AND FULL AGENT UI"
           echo "========================================"
           cd ambient-patient
           
+          # Deploy app-server (API on port 8081)
           docker compose -f agent/docker-compose.yaml up --build -d app-server
           
-          echo "✓ App server deployment started"
+          # Deploy full-agent-ui (Gradio UI on port 7861)
+          # This is the UI that pytest tests against at /full-assistant endpoint
+          docker compose -f agent/docker-compose.yaml up --build -d full-agent-ui
+          
+          echo "✓ App server and Full Agent UI deployment started"
           sleep 30
           docker ps --format "table {{.Names}}\t{{.Status}}"
 
@@ -533,9 +562,10 @@ jobs:
           echo "========================================"
           
           MAX_ATTEMPTS=180
-          ATTEMPT=0
+          FAILED=0
           
           # Wait for Agent LLM to be healthy
+          ATTEMPT=0
           echo "Checking Agent LLM health..."
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
@@ -547,6 +577,11 @@ jobs:
             [ $((ATTEMPT % 10)) -eq 0 ] && echo "  LLM Status: $STATUS ($ATTEMPT/$MAX_ATTEMPTS)"
             sleep 2
           done
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "✗ ERROR: Agent LLM failed to become healthy (timeout)"
+            docker logs --tail 50 agent-instruct-llm 2>&1 || true
+            FAILED=1
+          fi
           
           # Wait for App Server API (port 8081)
           ATTEMPT=0
@@ -560,6 +595,30 @@ jobs:
             [ $((ATTEMPT % 10)) -eq 0 ] && echo "  Waiting... ($ATTEMPT/$MAX_ATTEMPTS)"
             sleep 2
           done
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "✗ ERROR: App Server failed to start (timeout)"
+            docker logs --tail 50 app-server-healthcare-assistant 2>&1 || true
+            FAILED=1
+          fi
+          
+          # Wait for Full Agent UI (Gradio on port 7861)
+          # This is where pytest tests access /full-assistant
+          ATTEMPT=0
+          echo "Checking Full Agent UI (http://localhost:7861)..."
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            if curl -sf http://localhost:7861 2>/dev/null | grep -q "gradio"; then
+              echo "✓ Full Agent UI is ready (attempt $ATTEMPT)"
+              break
+            fi
+            [ $((ATTEMPT % 10)) -eq 0 ] && echo "  Waiting... ($ATTEMPT/$MAX_ATTEMPTS)"
+            sleep 2
+          done
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "✗ ERROR: Full Agent UI failed to start (timeout)"
+            docker logs --tail 50 full-agent-ui 2>&1 || true
+            FAILED=1
+          fi
           
           # Wait for Voice UI (port 4400)
           ATTEMPT=0
@@ -573,10 +632,23 @@ jobs:
             [ $((ATTEMPT % 10)) -eq 0 ] && echo "  Waiting... ($ATTEMPT/$MAX_ATTEMPTS)"
             sleep 2
           done
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "✗ ERROR: Voice UI failed to start (timeout)"
+            FAILED=1
+          fi
           
           echo ""
           echo "Final container status:"
           docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+          
+          if [ $FAILED -eq 1 ]; then
+            echo ""
+            echo "✗ SERVICES FAILED TO START - ABORTING"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ ALL SERVICES READY"
 
       # ==========================================
       # PHASE 3: Run pytest UI Tests
@@ -598,7 +670,7 @@ jobs:
             -v "$(pwd)/test_reports:/app/reports" \
             ${{ env.TEST_IMAGE }} \
             pytest -m "ambient_patient_agent and ui" \
-              --ambient-agent-ui-url="http://localhost:8081" \
+              --ambient-agent-ui-url="http://localhost:7861" \
               --disable-warnings \
               --self-contained-html \
               --html=/app/reports/${REPORT_FILE}
