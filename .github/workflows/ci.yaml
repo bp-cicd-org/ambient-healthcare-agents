@@ -2,8 +2,19 @@
 # Ambient Healthcare Agents CI
 # =============================================================================
 #
-# This workflow directly deploys services (without running notebooks) and then
-# runs pytest UI tests.
+# IMPORTANT: This workflow does NOT execute notebooks via nbclient.
+# Instead, it directly deploys services using docker compose commands
+# based on the deployment steps documented in the notebooks.
+#
+# Reason: The notebooks contain interactive elements (input(), manual file
+# editing) and environment-specific commands (systemctl, /ephemeral paths)
+# that are incompatible with CI execution.
+#
+# Deployment approach:
+#   1. Configure environment files (vars.env, ace_controller.env) via sed
+#   2. Deploy services directly using docker compose
+#   3. Wait for services to be ready
+#   4. Run pytest UI tests
 #
 # Required Secrets:
 #   - NGC_API_KEY          : NVIDIA NGC API Key for container registry access
