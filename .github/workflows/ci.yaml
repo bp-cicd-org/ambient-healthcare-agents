@@ -397,6 +397,15 @@ jobs:
       # ==========================================
       # PHASE 2: Deploy Services
       # ==========================================
+      - name: Check Available GPUs
+        run: |
+          echo "========================================"
+          echo "  CHECKING AVAILABLE GPUS"
+          echo "========================================"
+          nvidia-smi --query-gpu=index,name,memory.total --format=csv
+          GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+          echo "Total GPUs available: $GPU_COUNT"
+
       - name: Deploy Agent LLM NIM
         run: |
           echo "========================================"
@@ -404,8 +413,9 @@ jobs:
           echo "========================================"
           cd ambient-patient
           
-          # Set GPU IDs for llama-3.3-70b-instruct (needs 4 GPUs)
-          export AGENT_LLM_GPU_ID="0,1,2,3"
+          # Set GPU IDs for llama-3.3-70b-instruct
+          # Using GPUs 0,1 for the LLM (adjust based on available GPUs)
+          export AGENT_LLM_GPU_ID="0,1"
           
           docker compose -f agent/docker-compose.yaml up -d agent-instruct-llm
           
@@ -422,8 +432,9 @@ jobs:
           cd ambient-patient
           
           # Set GPU IDs for NemoGuard NIMs
-          export NEMOGUARD_CONTENT_SAFETY_LLM_GPU_ID="4"
-          export NEMOGUARD_TOPIC_CONTRIL_LLM_GPU_ID="5"
+          # Using GPUs 2 and 3 (adjust based on available GPUs)
+          export NEMOGUARD_CONTENT_SAFETY_LLM_GPU_ID="2"
+          export NEMOGUARD_TOPIC_CONTRIL_LLM_GPU_ID="3"
           
           docker compose -f agent/docker-compose.yaml up -d nemoguard-content-safety-llm nemoguard-topic-control-llm
           
