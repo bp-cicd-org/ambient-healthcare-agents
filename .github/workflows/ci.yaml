@@ -262,7 +262,7 @@ jobs:
           echo "  WAITING FOR SERVICES TO BE READY"
           echo "========================================"
           
-          MAX_ATTEMPTS=90
+          MAX_ATTEMPTS=180
           ATTEMPT=0
           
           # Wait for UI (port 5173)
@@ -277,13 +277,36 @@ jobs:
             sleep 2
           done
           
-          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-            echo "⚠ WARNING: UI service timeout"
-            docker ps -a --format "table {{.Names}}\t{{.Status}}"
-          fi
+          # Wait for Riva NIM to be healthy
+          ATTEMPT=0
+          echo "Waiting for Riva NIM (parakeet) to be healthy..."
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' parakeet-1-1b-ctc-en-us 2>/dev/null || echo "unknown")
+            if [ "$STATUS" = "healthy" ]; then
+              echo "✓ Riva NIM is healthy (attempt $ATTEMPT)"
+              break
+            fi
+            [ $((ATTEMPT % 10)) -eq 0 ] && echo "  Riva Status: $STATUS ($ATTEMPT/$MAX_ATTEMPTS)"
+            sleep 2
+          done
+          
+          # Wait for LLM NIM to be healthy
+          ATTEMPT=0
+          echo "Waiting for LLM NIM (nemotron) to be healthy..."
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' llama-3.3-nemotron-super-49b-v1 2>/dev/null || echo "unknown")
+            if [ "$STATUS" = "healthy" ]; then
+              echo "✓ LLM NIM is healthy (attempt $ATTEMPT)"
+              break
+            fi
+            [ $((ATTEMPT % 10)) -eq 0 ] && echo "  LLM Status: $STATUS ($ATTEMPT/$MAX_ATTEMPTS)"
+            sleep 2
+          done
           
           echo ""
-          echo "Docker containers status:"
+          echo "Final container status:"
           docker ps -a --format "table {{.Names}}\t{{.Status}}"
 
       # ==========================================
@@ -402,9 +425,14 @@ jobs:
           echo "========================================"
           echo "  CHECKING AVAILABLE GPUS"
           echo "========================================"
-          nvidia-smi --query-gpu=index,name,memory.total --format=csv
-          GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
-          echo "Total GPUs available: $GPU_COUNT"
+          if command -v nvidia-smi &> /dev/null; then
+            nvidia-smi --query-gpu=index,name,memory.total --format=csv
+            GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+            echo "Total GPUs available: $GPU_COUNT"
+          else
+            echo "nvidia-smi not found, skipping GPU check"
+            echo "Docker will handle GPU allocation via NVIDIA Container Toolkit"
+          fi
 
       - name: Deploy Agent LLM NIM
         run: |
