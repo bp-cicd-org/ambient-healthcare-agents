@@ -39,9 +39,9 @@ on:
   workflow_dispatch:
     inputs:
       run_ambient_provider:
-        description: 'Run Ambient Provider tests (requires 5x A100 or 2x H100)'
+        description: 'Run Ambient Provider tests (requires 4x H100: GPU 0-1 for LLM, GPU 2 for Riva)'
         required: false
-        default: false  # Disabled by default due to high GPU requirements
+        default: false  # Disabled by default - enable when 4x H100 runner is available
         type: boolean
       run_ambient_patient:
         description: 'Run Ambient Patient tests'
@@ -150,19 +150,22 @@ jobs:
   # │ Total (Full Deploy) │ All services                            │ 5x A100 (400GB) or equiv   │
   # └─────────────────────┴─────────────────────────────────────────┴────────────────────────────┘
   #
+  # GPU ALLOCATION FOR 4x H100:
+  # ┌─────────┬────────────────────────────────────────┐
+  # │ GPU     │ Service                                │
+  # ├─────────┼────────────────────────────────────────┤
+  # │ GPU 0-1 │ LLM NIM (nemotron-49b) - needs 2x H100 │
+  # │ GPU 2   │ Riva ASR NIM (parakeet)                │
+  # │ GPU 3   │ Reserved (spare)                       │
+  # └─────────┴────────────────────────────────────────┘
+  #
   # CURRENT STATUS: DISABLED BY DEFAULT
+  # To enable: Set run_ambient_provider=true in workflow_dispatch
   #
   # Known Issues (2026-01-27):
   #   1. Riva NIM (parakeet) crashes with PyTorch/Triton initialization error
-  #      - Error: "TypeError: 'builtin_function_or_method' object does not support vectorcall"
-  #      - Followed by Segmentation Fault in Triton Python backend
   #      - Possible cause: CUDA/driver version incompatibility with NIM container
-  #
-  #   2. LLM NIM (nemotron-49b) fails to become healthy within timeout
-  #      - 49B model requires significant GPU memory (2x H100 or 4x A100)
-  #      - Model loading can take 15+ minutes on first run
-  #
-  # To enable: Set run_ambient_provider=true in workflow_dispatch, or modify default above
+  #   2. LLM NIM (nemotron-49b) may take 15+ minutes to load on first run
   #
   ambient-provider:
     name: Ambient Provider - Deploy & Test
@@ -258,6 +261,42 @@ jobs:
       # ==========================================
       # PHASE 3: Deploy Services
       # ==========================================
+      - name: Check Available GPUs
+        run: |
+          echo "========================================"
+          echo "  CHECKING AVAILABLE GPUS"
+          echo "========================================"
+          if command -v nvidia-smi &> /dev/null; then
+            nvidia-smi --query-gpu=index,name,memory.total --format=csv
+            GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+            echo "Total GPUs available: $GPU_COUNT"
+          else
+            echo "nvidia-smi not found, Docker will handle GPU allocation"
+          fi
+
+      - name: Configure GPU Allocation for 4x H100
+        run: |
+          echo "========================================"
+          echo "  CONFIGURING GPU ALLOCATION"
+          echo "========================================"
+          
+          cd ambient-provider/ambient-scribe/infra
+          
+          # GPU Layout for 4x H100:
+          # - GPU 0,1: LLM NIM (nemotron-49b) - needs 2x H100
+          # - GPU 2:   Riva ASR NIM (parakeet)
+          # - GPU 3:   Reserved (spare)
+          
+          # Update parakeet-nim to use GPU 2 (instead of GPU 0)
+          sed -i "s/device_ids: \['0'\]/device_ids: ['2']/g" compose.dev.yml
+          
+          # Update llama-nim to use GPU 0,1 (instead of 'all')
+          sed -i "s/device_ids: \['all'\]/device_ids: ['0', '1']/g" compose.dev.yml
+          
+          echo "✓ GPU allocation configured:"
+          echo "  - Riva ASR NIM (parakeet): GPU 2"
+          echo "  - LLM NIM (nemotron-49b):  GPU 0,1"
+
       - name: Deploy Services with NIM
         env:
           NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
@@ -270,6 +309,7 @@ jobs:
           cd ambient-provider/ambient-scribe
           
           # Deploy with local NIM (Riva + LLM)
+          # This uses the modified compose.dev.yml with correct GPU allocation
           make dev-nim
           
           echo "Waiting for NIMs to be ready..."
@@ -626,12 +666,12 @@ jobs:
           fi
           
           # Wait for Full Agent UI (Gradio on port 7861)
-          # Gradio app is mounted at /full-assistant, not at root /
+          # Gradio app is mounted at /full-assistant/, use -L to follow 307 redirect
           ATTEMPT=0
-          echo "Checking Full Agent UI (http://localhost:7861/full-assistant)..."
+          echo "Checking Full Agent UI (http://localhost:7861/full-assistant/)..."
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
-            if curl -sf http://localhost:7861/full-assistant 2>/dev/null | grep -qi "gradio"; then
+            if curl -sfL http://localhost:7861/full-assistant/ 2>/dev/null | grep -qi "gradio"; then
               echo "✓ Full Agent UI is ready (attempt $ATTEMPT)"
               break
             fi
