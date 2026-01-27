@@ -184,19 +184,13 @@ jobs:
         run: |
           echo "Configuring environment files..."
           
-          # Update apps/api/.env
-          sed -i "s|^NVIDIA_API_KEY=.*|NVIDIA_API_KEY=${NVIDIA_API_KEY}|g" ambient-provider/ambient-scribe/apps/api/.env || true
-          sed -i "s|^NGC_API_KEY=.*|NGC_API_KEY=${NGC_API_KEY}|g" ambient-provider/ambient-scribe/apps/api/.env || true
+          # Create directory if needed
+          mkdir -p ambient-provider/ambient-scribe/apps/api
           
-          # If .env doesn't exist, create it
-          if [ ! -f "ambient-provider/ambient-scribe/apps/api/.env" ]; then
-            mkdir -p ambient-provider/ambient-scribe/apps/api
-            cat > ambient-provider/ambient-scribe/apps/api/.env <<EOF
-NVIDIA_API_KEY=${NVIDIA_API_KEY}
-NGC_API_KEY=${NGC_API_KEY}
-RIVA_URI=parakeet-nim:50051
-EOF
-          fi
+          # Create or update .env file
+          echo "NVIDIA_API_KEY=${NVIDIA_API_KEY}" > ambient-provider/ambient-scribe/apps/api/.env
+          echo "NGC_API_KEY=${NGC_API_KEY}" >> ambient-provider/ambient-scribe/apps/api/.env
+          echo "RIVA_URI=parakeet-nim:50051" >> ambient-provider/ambient-scribe/apps/api/.env
           
           echo "✓ Environment files configured"
 
