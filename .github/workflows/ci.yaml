@@ -39,9 +39,9 @@ on:
   workflow_dispatch:
     inputs:
       run_ambient_provider:
-        description: 'Run Ambient Provider tests'
+        description: 'Run Ambient Provider tests (requires 5x A100 or 2x H100)'
         required: false
-        default: true
+        default: false  # Disabled by default due to high GPU requirements
         type: boolean
       run_ambient_patient:
         description: 'Run Ambient Patient tests'
@@ -140,6 +140,30 @@ jobs:
   # ============================================
   # AMBIENT PROVIDER: Deploy & Test
   # ============================================
+  #
+  # HARDWARE REQUIREMENTS (from ambient-provider/README.md):
+  # ┌─────────────────────┬─────────────────────────────────────────┬────────────────────────────┐
+  # │ Service             │ Description                             │ GPU Requirement            │
+  # ├─────────────────────┼─────────────────────────────────────────┼────────────────────────────┤
+  # │ Riva ASR NIM        │ parakeet-1.1b-en-US-asr-streaming       │ 1x L40 or A100 (75GB)      │
+  # │ LLM NIM             │ llama-3.3-nemotron-super-49b-v1         │ 2x H100 or 4x A100 (325GB) │
+  # │ Total (Full Deploy) │ All services                            │ 5x A100 (400GB) or equiv   │
+  # └─────────────────────┴─────────────────────────────────────────┴────────────────────────────┘
+  #
+  # CURRENT STATUS: DISABLED BY DEFAULT
+  #
+  # Known Issues (2026-01-27):
+  #   1. Riva NIM (parakeet) crashes with PyTorch/Triton initialization error
+  #      - Error: "TypeError: 'builtin_function_or_method' object does not support vectorcall"
+  #      - Followed by Segmentation Fault in Triton Python backend
+  #      - Possible cause: CUDA/driver version incompatibility with NIM container
+  #
+  #   2. LLM NIM (nemotron-49b) fails to become healthy within timeout
+  #      - 49B model requires significant GPU memory (2x H100 or 4x A100)
+  #      - Model loading can take 15+ minutes on first run
+  #
+  # To enable: Set run_ambient_provider=true in workflow_dispatch, or modify default above
+  #
   ambient-provider:
     name: Ambient Provider - Deploy & Test
     needs: preflight
@@ -602,12 +626,12 @@ jobs:
           fi
           
           # Wait for Full Agent UI (Gradio on port 7861)
-          # This is where pytest tests access /full-assistant
+          # Gradio app is mounted at /full-assistant, not at root /
           ATTEMPT=0
-          echo "Checking Full Agent UI (http://localhost:7861)..."
+          echo "Checking Full Agent UI (http://localhost:7861/full-assistant)..."
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
-            if curl -sf http://localhost:7861 2>/dev/null | grep -q "gradio"; then
+            if curl -sf http://localhost:7861/full-assistant 2>/dev/null | grep -qi "gradio"; then
               echo "✓ Full Agent UI is ready (attempt $ATTEMPT)"
               break
             fi
