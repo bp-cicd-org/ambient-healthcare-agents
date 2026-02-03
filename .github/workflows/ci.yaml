@@ -472,7 +472,7 @@ jobs:
           done
           if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
             echo "✗ ERROR: API service timeout"
-            docker logs ambient-scribe-api-1 --tail 30 2>&1 || true
+            docker logs infra-api-1 --tail 30 2>&1 || true
             exit 1
           fi
           
@@ -539,10 +539,10 @@ jobs:
             docker logs parakeet-1-1b-ctc-en-us --tail 50 2>&1 || true
             echo ""
             echo "--- API Logs (last 30 lines) ---"
-            docker logs ambient-scribe-api-1 --tail 30 2>&1 || true
+            docker logs infra-api-1 --tail 30 2>&1 || true
             echo ""
             echo "--- UI Logs (last 30 lines) ---"
-            docker logs ambient-scribe-ui-1 --tail 30 2>&1 || true
+            docker logs infra-ui-1 --tail 30 2>&1 || true
             exit $PYTEST_EXIT
           fi
           
@@ -933,7 +933,7 @@ jobs:
             docker logs agent-instruct-llm --tail 30 2>&1 || true
             echo ""
             echo "--- App Server Logs (last 30 lines) ---"
-            docker logs agent-app-server-1 --tail 30 2>&1 || docker logs app-server --tail 30 2>&1 || true
+            docker logs app-server-healthcare-assistant --tail 30 2>&1 || true
           fi
 
       # ==========================================
@@ -981,7 +981,7 @@ jobs:
             docker logs nemoguard-topic-control-llm --tail 30 2>&1 || true
             echo ""
             echo "--- App Server Logs (last 30 lines) ---"
-            docker logs agent-app-server-1 --tail 30 2>&1 || docker logs app-server --tail 30 2>&1 || true
+            docker logs app-server-healthcare-assistant --tail 30 2>&1 || true
             exit $PYTEST_EXIT
           fi
           
