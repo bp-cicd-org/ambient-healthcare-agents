@@ -234,7 +234,12 @@ jobs:
           echo "========================================"
           echo "  AMBIENT PROVIDER - GPU CHECK"
           echo "========================================"
-          nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv
+          if command -v nvidia-smi &> /dev/null; then
+            nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv
+          else
+            echo "⚠ nvidia-smi not available (DinD mode)"
+            echo "GPU access will be via Docker --gpus flag"
+          fi
           echo ""
           echo "This job requires: 1x GPU (16GB+) for Riva ASR NIM"
           echo "LLM uses NVIDIA API Catalog (no local GPU needed)"
@@ -501,7 +506,12 @@ jobs:
           echo "========================================"
           echo "  AMBIENT PATIENT - GPU CHECK"
           echo "========================================"
-          nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv
+          if command -v nvidia-smi &> /dev/null; then
+            nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv
+          else
+            echo "⚠ nvidia-smi not available (DinD mode)"
+            echo "GPU access will be via Docker --gpus flag"
+          fi
           echo ""
           echo "This job requires: 4x H100 GPUs"
           echo "  - GPU 0,1: Llama 70B Instruct (self-hosted)"
