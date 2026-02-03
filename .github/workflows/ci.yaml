@@ -374,14 +374,77 @@ jobs:
           
           echo "✓ Services deployed"
 
-      - name: Wait for Services Ready
+      - name: Wait for Riva NIM to be Healthy
         run: |
           echo "========================================"
-          echo "  WAITING FOR SERVICES TO BE READY"
+          echo "  WAITING FOR RIVA NIM TO BE HEALTHY"
           echo "========================================"
           
-          MAX_ATTEMPTS=180
-          FAILED=0
+          MAX_ATTEMPTS=180  # 6 minutes (NIM needs time to load model)
+          ATTEMPT=0
+          NIM_CONTAINER="parakeet-1-1b-ctc-en-us"
+          
+          echo "Checking Riva NIM container health status..."
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            
+            # Check if container exists
+            if ! docker ps -a --format '{{.Names}}' | grep -q "^${NIM_CONTAINER}$"; then
+              echo "  Container ${NIM_CONTAINER} not found, waiting..."
+              sleep 2
+              continue
+            fi
+            
+            # Check container health status
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' ${NIM_CONTAINER} 2>/dev/null || echo "unknown")
+            
+            if [ "$STATUS" = "healthy" ]; then
+              echo "✓ Riva NIM is healthy (attempt $ATTEMPT)"
+              break
+            fi
+            
+            [ $((ATTEMPT % 15)) -eq 0 ] && echo "  NIM status: $STATUS ($ATTEMPT/$MAX_ATTEMPTS)"
+            sleep 2
+          done
+          
+          if [ "$STATUS" != "healthy" ]; then
+            echo ""
+            echo "✗ ERROR: Riva NIM failed to become healthy"
+            echo ""
+            echo "--- Container Status ---"
+            docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            echo ""
+            echo "--- Riva NIM Logs (last 50 lines) ---"
+            docker logs ${NIM_CONTAINER} --tail 50 2>&1 || echo "No logs available"
+            echo ""
+            exit 1
+          fi
+
+      - name: Wait for UI and API Services
+        run: |
+          echo "========================================"
+          echo "  WAITING FOR UI AND API SERVICES"
+          echo "========================================"
+          
+          MAX_ATTEMPTS=120
+          
+          # Wait for API (port 8000)
+          ATTEMPT=0
+          echo "Checking API service (http://localhost:8000/api/health/)..."
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            if curl -sf http://localhost:8000/api/health/ 2>/dev/null; then
+              echo "✓ API is ready (attempt $ATTEMPT)"
+              break
+            fi
+            [ $((ATTEMPT % 30)) -eq 0 ] && echo "  Waiting... ($ATTEMPT/$MAX_ATTEMPTS)"
+            sleep 2
+          done
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "✗ ERROR: API service timeout"
+            docker logs ambient-scribe-api-1 --tail 30 2>&1 || true
+            exit 1
+          fi
           
           # Wait for UI (port 5173)
           ATTEMPT=0
@@ -396,32 +459,15 @@ jobs:
             sleep 2
           done
           if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-            echo "⚠ WARNING: UI service timeout"
-            FAILED=1
-          fi
-          
-          # Wait for Riva NIM
-          ATTEMPT=0
-          echo "Checking Riva NIM (http://localhost:9000/v1/health)..."
-          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            ATTEMPT=$((ATTEMPT + 1))
-            if curl -sf http://localhost:9000/v1/health 2>/dev/null; then
-              echo "✓ Riva NIM is ready (attempt $ATTEMPT)"
-              break
-            fi
-            [ $((ATTEMPT % 30)) -eq 0 ] && echo "  Waiting... ($ATTEMPT/$MAX_ATTEMPTS)"
-            sleep 2
-          done
-          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-            echo "⚠ WARNING: Riva NIM timeout"
+            echo "✗ ERROR: UI service timeout"
+            exit 1
           fi
           
           echo ""
-          echo "Final container status:"
-          docker ps -a --format "table {{.Names}}\t{{.Status}}"
-          
+          echo "--- Final Container Status ---"
+          docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
           echo ""
-          echo "✓ Service check completed"
+          echo "✓ All services are ready"
 
       # ==========================================
       # PYTEST: Run in same job to access services
@@ -438,6 +484,7 @@ jobs:
           
           mkdir -p test_reports
           
+          # Run pytest - exit code will be preserved
           docker run --rm \
             --network host \
             -v "$(pwd)/test_reports:/app/reports" \
@@ -447,11 +494,10 @@ jobs:
               --api-url="http://localhost:8000" \
               --disable-warnings \
               --self-contained-html \
-              --html=/app/reports/${REPORT_FILE} \
-            || echo "pytest completed with failures"
+              --html=/app/reports/${REPORT_FILE}
           
+          echo "✓ All tests passed"
           echo "Test report saved to: test_reports/${REPORT_FILE}"
-        continue-on-error: true
 
       - name: Upload Test Report
         uses: actions/upload-artifact@v4
@@ -630,31 +676,98 @@ jobs:
           echo "✓ All services deployed"
           docker ps -a --format "table {{.Names}}\t{{.Status}}"
 
-      - name: Wait for Services Ready
+      - name: Wait for Agent LLM to be Healthy
         run: |
           echo "========================================"
-          echo "  WAITING FOR SERVICES TO BE READY"
+          echo "  WAITING FOR AGENT LLM TO BE HEALTHY"
           echo "========================================"
           
-          MAX_ATTEMPTS=300
-          FAILED=0
-          
-          # Wait for Agent LLM to be healthy
+          MAX_ATTEMPTS=450  # 15 minutes (LLM NIM needs significant time to load)
           ATTEMPT=0
-          echo "Checking Agent LLM health..."
+          LLM_CONTAINER="agent-instruct-llm"
+          
+          echo "Checking Agent LLM container health status..."
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
-            STATUS=$(docker inspect --format='{{.State.Health.Status}}' agent-instruct-llm 2>/dev/null || echo "unknown")
+            
+            # Check if container exists
+            if ! docker ps -a --format '{{.Names}}' | grep -q "^${LLM_CONTAINER}$"; then
+              echo "  Container ${LLM_CONTAINER} not found, waiting..."
+              sleep 2
+              continue
+            fi
+            
+            # Check container health status
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' ${LLM_CONTAINER} 2>/dev/null || echo "unknown")
+            
             if [ "$STATUS" = "healthy" ]; then
               echo "✓ Agent LLM is healthy (attempt $ATTEMPT)"
               break
             fi
-            [ $((ATTEMPT % 30)) -eq 0 ] && echo "  LLM Status: $STATUS ($ATTEMPT/$MAX_ATTEMPTS)"
+            
+            [ $((ATTEMPT % 30)) -eq 0 ] && echo "  LLM status: $STATUS ($ATTEMPT/$MAX_ATTEMPTS)"
             sleep 2
           done
-          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-            echo "⚠ WARNING: Agent LLM timeout"
+          
+          if [ "$STATUS" != "healthy" ]; then
+            echo ""
+            echo "✗ ERROR: Agent LLM failed to become healthy"
+            echo ""
+            echo "--- Container Status ---"
+            docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            echo ""
+            echo "--- Agent LLM Logs (last 50 lines) ---"
+            docker logs ${LLM_CONTAINER} --tail 50 2>&1 || echo "No logs available"
+            echo ""
+            exit 1
           fi
+
+      - name: Wait for NemoGuard NIMs to be Healthy
+        run: |
+          echo "========================================"
+          echo "  WAITING FOR NEMOGUARD NIMS"
+          echo "========================================"
+          
+          MAX_ATTEMPTS=180  # 6 minutes
+          
+          for CONTAINER in "nemoguard-content-safety-llm" "nemoguard-topic-control-llm"; do
+            ATTEMPT=0
+            echo "Checking ${CONTAINER} health..."
+            
+            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+              ATTEMPT=$((ATTEMPT + 1))
+              
+              if ! docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+                echo "  Container ${CONTAINER} not found, waiting..."
+                sleep 2
+                continue
+              fi
+              
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' ${CONTAINER} 2>/dev/null || echo "unknown")
+              
+              if [ "$STATUS" = "healthy" ]; then
+                echo "✓ ${CONTAINER} is healthy (attempt $ATTEMPT)"
+                break
+              fi
+              
+              [ $((ATTEMPT % 30)) -eq 0 ] && echo "  ${CONTAINER} status: $STATUS ($ATTEMPT/$MAX_ATTEMPTS)"
+              sleep 2
+            done
+            
+            if [ "$STATUS" != "healthy" ]; then
+              echo "✗ ERROR: ${CONTAINER} failed to become healthy"
+              docker logs ${CONTAINER} --tail 30 2>&1 || true
+              exit 1
+            fi
+          done
+
+      - name: Wait for UI Services
+        run: |
+          echo "========================================"
+          echo "  WAITING FOR UI SERVICES"
+          echo "========================================"
+          
+          MAX_ATTEMPTS=120
           
           # Wait for App Server (port 8081)
           ATTEMPT=0
@@ -669,7 +782,8 @@ jobs:
             sleep 2
           done
           if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-            echo "⚠ WARNING: App Server timeout"
+            echo "✗ ERROR: App Server timeout"
+            exit 1
           fi
           
           # Wait for Full Agent UI (port 7861)
@@ -685,7 +799,8 @@ jobs:
             sleep 2
           done
           if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-            echo "⚠ WARNING: Full Agent UI timeout"
+            echo "✗ ERROR: Full Agent UI timeout"
+            exit 1
           fi
           
           # Wait for Voice UI (port 4400)
@@ -701,14 +816,15 @@ jobs:
             sleep 2
           done
           if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-            echo "⚠ WARNING: Voice UI timeout"
+            echo "✗ ERROR: Voice UI timeout"
+            exit 1
           fi
           
           echo ""
-          echo "Final container status:"
+          echo "--- Final Container Status ---"
           docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
           echo ""
-          echo "✓ Service check completed"
+          echo "✓ All services are ready"
 
       # ==========================================
       # PYTEST: Run in same job to access services
@@ -725,6 +841,7 @@ jobs:
           
           mkdir -p test_reports
           
+          # Run pytest - exit code will be preserved
           docker run --rm \
             --network host \
             -v "$(pwd)/test_reports:/app/reports" \
@@ -733,11 +850,10 @@ jobs:
               --ambient-agent-ui-url="http://localhost:7861" \
               --disable-warnings \
               --self-contained-html \
-              --html=/app/reports/${REPORT_FILE} \
-            || echo "pytest completed with failures"
+              --html=/app/reports/${REPORT_FILE}
           
+          echo "✓ Agent UI tests passed"
           echo "Test report saved to: test_reports/${REPORT_FILE}"
-        continue-on-error: true
 
       - name: Run pytest - Ambient Patient Voice UI
         id: pytest_voice
@@ -751,6 +867,7 @@ jobs:
           
           mkdir -p test_reports
           
+          # Run pytest - exit code will be preserved
           docker run --rm \
             --network host \
             -v "$(pwd)/test_reports:/app/reports" \
@@ -759,11 +876,10 @@ jobs:
               --ambient-patient-voice-ui-url="http://localhost:4400" \
               --disable-warnings \
               --self-contained-html \
-              --html=/app/reports/${REPORT_FILE} \
-            || echo "pytest completed with failures"
+              --html=/app/reports/${REPORT_FILE}
           
+          echo "✓ Voice UI tests passed"
           echo "Test report saved to: test_reports/${REPORT_FILE}"
-        continue-on-error: true
 
       - name: Upload Test Reports
         uses: actions/upload-artifact@v4
