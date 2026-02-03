@@ -5,18 +5,19 @@
 # This workflow executes notebooks via nbclient to deploy and validate services.
 #
 # NOTEBOOK EXECUTION APPROACH:
-#   - ambient-provider.ipynb: Self-hosts Riva ASR NIM (GPU 2) + uses API Catalog for LLM
+#   - ambient-provider.ipynb: Self-hosts Riva ASR NIM (GPU 4) + uses API Catalog for LLM
 #   - ambient-patient.ipynb: Self-hosts Llama 70B (GPU 0,1) + NemoGuard NIMs (GPU 2,3)
 #   - Docker stop/down cells are SKIPPED to keep services running for pytest
 #   - Interactive input cells are handled via environment variables
 #
-# GPU ALLOCATION (4x H100):
+# GPU ALLOCATION (5x H100):
 #   ┌─────────┬────────────────────────────────────────────────────────────────┐
 #   │ GPU     │ Service                                                        │
 #   ├─────────┼────────────────────────────────────────────────────────────────┤
 #   │ GPU 0,1 │ Llama 70B Instruct (ambient-patient)                           │
-#   │ GPU 2   │ Riva ASR NIM (ambient-provider) / NemoGuard Content (patient)  │
+#   │ GPU 2   │ NemoGuard Content Safety (ambient-patient)                     │
 #   │ GPU 3   │ NemoGuard Topic Control (ambient-patient)                      │
+#   │ GPU 4   │ Riva ASR NIM (ambient-provider)                                │
 #   └─────────┴────────────────────────────────────────────────────────────────┘
 #
 # Required Secrets:
@@ -236,9 +237,9 @@ jobs:
   # ============================================
   #
   # GPU REQUIREMENTS (from ambient-provider.ipynb):
-  #   - Riva ASR NIM (parakeet): 1x GPU (16GB+) - Self-hosted
+  #   - Riva ASR NIM (parakeet): 1x H100 (GPU 4) - Self-hosted (dedicated)
   #   - LLM (Nemotron 49B): Uses NVIDIA API Catalog (no local GPU)
-  #   - Total: 1x GPU minimum
+  #   - Total: 1x GPU (dedicated GPU 4, no conflict with ambient-patient)
   #
   # NOTEBOOK CELLS SKIPPED:
   #   - Cells with `!make down` (to keep services running for pytest)
@@ -269,8 +270,9 @@ jobs:
             echo "GPU access will be via Docker --gpus flag"
           fi
           echo ""
-          echo "This job requires: 1x GPU (16GB+) for Riva ASR NIM"
-          echo "LLM uses NVIDIA API Catalog (no local GPU needed)"
+          echo "This job uses: 1x H100 GPU (GPU 4, dedicated)"
+          echo "  - GPU 4: Riva ASR NIM (self-hosted)"
+          echo "  - LLM uses NVIDIA API Catalog (no local GPU needed)"
 
       - name: Docker Login to NGC
         env:
@@ -390,9 +392,9 @@ jobs:
           # Bootstrap
           make bootstrap
           
-          # Configure GPU allocation (GPU 2 for Riva)
+          # Configure GPU allocation (GPU 4 for Riva - dedicated GPU)
           cd infra
-          sed -i "s/device_ids: \['0'\]/device_ids: ['2']/g" compose.dev.yml || true
+          sed -i "s/device_ids: \['0'\]/device_ids: ['4']/g" compose.dev.yml || true
           cd ..
           
           # Deploy services with NIM
@@ -571,10 +573,10 @@ jobs:
   #
   # GPU REQUIREMENTS (from ambient-patient.ipynb):
   #   - Llama 70B Instruct: 2x H100 (GPU 0,1) - Self-hosted
-  #   - NemoGuard Content Safety: 1x H100 (GPU 2) - Self-hosted
-  #   - NemoGuard Topic Control: 1x H100 (GPU 3) - Self-hosted
+  #   - NemoGuard Content Safety: 1x H100 (GPU 2) - Self-hosted (dedicated)
+  #   - NemoGuard Topic Control: 1x H100 (GPU 3) - Self-hosted (dedicated)
   #   - Riva ASR/TTS: Uses NVIDIA API Catalog (no local GPU)
-  #   - Total: 4x H100 required
+  #   - Total: 4x H100 used (GPU 4 reserved for ambient-provider)
   #
   # NOTEBOOK CELLS SKIPPED:
   #   - Cells with `docker compose down` (to keep services running for pytest)
@@ -606,10 +608,11 @@ jobs:
             echo "GPU access will be via Docker --gpus flag"
           fi
           echo ""
-          echo "This job requires: 4x H100 GPUs"
+          echo "This job uses: 4x H100 GPUs (GPU 0-3)"
           echo "  - GPU 0,1: Llama 70B Instruct (self-hosted)"
-          echo "  - GPU 2: NemoGuard Content Safety (self-hosted)"
-          echo "  - GPU 3: NemoGuard Topic Control (self-hosted)"
+          echo "  - GPU 2: NemoGuard Content Safety (self-hosted, dedicated)"
+          echo "  - GPU 3: NemoGuard Topic Control (self-hosted, dedicated)"
+          echo "  - GPU 4: Reserved for ambient-provider (Riva ASR)"
           echo "  - Riva ASR/TTS: Uses NVIDIA API Catalog"
 
       - name: Docker Login to NGC
