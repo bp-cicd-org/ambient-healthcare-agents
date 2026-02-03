@@ -62,7 +62,7 @@ jobs:
   # ============================================
   preflight:
     name: Preflight Checks
-    runs-on: arc-runner-set-oke-org-poc-4-gpu
+    runs-on: arc-runner-set-oke-org-poc-5-gpu
     outputs:
       preflight_passed: ${{ steps.preflight.outputs.passed }}
       gpu_count: ${{ steps.gpu_info.outputs.gpu_count }}
@@ -139,7 +139,7 @@ jobs:
           
           FAILED=0
           
-          # Check 1: NGC API Key
+          # Check 1: NGC API Key - verify it's set
           if [ -z "${NGC_API_KEY}" ]; then
             echo "✗ ERROR: NGC_API_KEY is not set"
             FAILED=1
@@ -147,7 +147,35 @@ jobs:
             echo "✓ NGC_API_KEY is set"
           fi
           
-          # Check 2: NVIDIA API Key
+          # Check 2: NGC API Key - validate subscription/access
+          if [ -n "${NGC_API_KEY}" ]; then
+            echo "Validating NGC API Key subscription access..."
+            NGC_RESPONSE=$(curl -sf -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${NGC_API_KEY}" \
+              "https://api.ngc.nvidia.com/v2/org" 2>/dev/null || echo "000")
+            
+            if [ "$NGC_RESPONSE" = "200" ]; then
+              echo "✓ NGC API Key has valid subscription access"
+            elif [ "$NGC_RESPONSE" = "401" ]; then
+              echo "✗ ERROR: NGC API Key is invalid or expired (HTTP 401)"
+              FAILED=1
+            elif [ "$NGC_RESPONSE" = "402" ]; then
+              echo "✗ ERROR: NGC API Key subscription expired or payment required (HTTP 402)"
+              echo "  Please verify your NGC subscription at https://org.ngc.nvidia.com/"
+              FAILED=1
+            elif [ "$NGC_RESPONSE" = "403" ]; then
+              echo "✗ ERROR: NGC API Key lacks required permissions (HTTP 403)"
+              FAILED=1
+            elif [ "$NGC_RESPONSE" = "000" ]; then
+              echo "⚠ WARNING: Could not reach NGC API to validate key (network issue)"
+              echo "  Continuing with workflow, but NIM downloads may fail..."
+            else
+              echo "⚠ WARNING: NGC API returned unexpected status: HTTP $NGC_RESPONSE"
+              echo "  Continuing with workflow, but NIM downloads may fail..."
+            fi
+          fi
+          
+          # Check 3: NVIDIA API Key
           if [ -z "${NVIDIA_API_KEY}" ]; then
             echo "✗ ERROR: NVIDIA_API_KEY is not set"
             FAILED=1
@@ -155,7 +183,7 @@ jobs:
             echo "✓ NVIDIA_API_KEY is set"
           fi
           
-          # Check 3: Test Image can be pulled
+          # Check 4: Test Image can be pulled
           echo "Pulling test image: ${{ env.TEST_IMAGE }}"
           if docker pull ${{ env.TEST_IMAGE }}; then
             echo "✓ Test image pulled successfully"
@@ -164,7 +192,7 @@ jobs:
             FAILED=1
           fi
           
-          # Check 4: Submodules
+          # Check 5: Submodules
           if [ -d "ambient-provider" ] && [ "$(ls -A ambient-provider 2>/dev/null)" ]; then
             echo "✓ ambient-provider submodule is initialized"
           else
@@ -178,7 +206,7 @@ jobs:
             FAILED=1
           fi
           
-          # Check 5: GPU availability
+          # Check 6: GPU availability
           if command -v nvidia-smi &> /dev/null; then
             GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
             if [ "$GPU_COUNT" -ge 1 ]; then
@@ -220,7 +248,7 @@ jobs:
     name: Ambient Provider - Notebook & Test
     needs: preflight
     if: ${{ needs.preflight.outputs.preflight_passed == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_ambient_provider) }}
-    runs-on: arc-runner-set-oke-org-poc-4-gpu
+    runs-on: arc-runner-set-oke-org-poc-5-gpu
     timeout-minutes: 120
     
     steps:
@@ -557,7 +585,7 @@ jobs:
     name: Ambient Patient - Notebook & Test
     needs: preflight
     if: ${{ needs.preflight.outputs.preflight_passed == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_ambient_patient) }}
-    runs-on: arc-runner-set-oke-org-poc-4-gpu
+    runs-on: arc-runner-set-oke-org-poc-5-gpu
     timeout-minutes: 240
     
     steps:
@@ -902,7 +930,7 @@ jobs:
             docker logs agent-instruct-llm --tail 30 2>&1 || true
             echo ""
             echo "--- App Server Logs (last 30 lines) ---"
-            docker logs app-server --tail 30 2>&1 || true
+            docker logs agent-app-server-1 --tail 30 2>&1 || docker logs app-server --tail 30 2>&1 || true
           fi
 
       # ==========================================
@@ -950,7 +978,7 @@ jobs:
             docker logs nemoguard-topic-control-llm --tail 30 2>&1 || true
             echo ""
             echo "--- App Server Logs (last 30 lines) ---"
-            docker logs app-server --tail 30 2>&1 || true
+            docker logs agent-app-server-1 --tail 30 2>&1 || docker logs app-server --tail 30 2>&1 || true
             exit $PYTEST_EXIT
           fi
           
