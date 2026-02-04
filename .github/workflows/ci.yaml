@@ -318,11 +318,9 @@ jobs:
           # Create .env file for the API
           # Note: Only NVIDIA_API_KEY is needed (NGC_API_KEY causes Pydantic validation error)
           mkdir -p apps/api
-          cat > apps/api/.env <<EOF
-NVIDIA_API_KEY=${NVIDIA_API_KEY}
-RIVA_URI=parakeet-nim:50051
-SELF_HOSTED=true
-EOF
+          echo "NVIDIA_API_KEY=${NVIDIA_API_KEY}" > apps/api/.env
+          echo "RIVA_URI=parakeet-nim:50051" >> apps/api/.env
+          echo "SELF_HOSTED=true" >> apps/api/.env
           
           echo "--- apps/api/.env ---"
           cat apps/api/.env | sed 's/nvapi-.*/nvapi-***/g'
