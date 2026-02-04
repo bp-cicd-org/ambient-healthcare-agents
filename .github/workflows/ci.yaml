@@ -395,6 +395,10 @@ jobs:
           # Configure GPU allocation (GPU 4 for Riva - dedicated GPU)
           cd infra
           sed -i "s/device_ids: \['0'\]/device_ids: ['4']/g" compose.dev.yml || true
+          
+          # Configure Riva NIM for streaming mode (required for enable_streaming=true)
+          # Change mode=all to mode=streaming to match the application's streaming API calls
+          sed -i "s/mode=all/mode=streaming/g" compose.dev.yml || true
           cd ..
           
           # Deploy services with NIM
@@ -942,6 +946,56 @@ jobs:
             docker logs app-server-healthcare-assistant --tail 30 2>&1 || true
           fi
 
+      - name: Debug - Test Tool Calling (Appointment Query)
+        run: |
+          echo "========================================"
+          echo "  DEBUG: TESTING TOOL CALLING CAPABILITY"
+          echo "========================================"
+          echo ""
+          echo "This tests if the agent can handle appointment-related queries"
+          echo "which require tool calling (find_available_appointments)."
+          echo ""
+          
+          # Test 1: Simple greeting (baseline)
+          echo "--- Test 1: Simple greeting (baseline) ---"
+          RESPONSE1=$(curl -sf -X POST http://localhost:8081/generate \
+            -H "Content-Type: application/json" \
+            -d '{"messages": [{"role": "user", "content": "Hello, I want to check in"}]}' \
+            --max-time 120 2>&1 || echo "REQUEST_FAILED")
+          echo "Response: $(echo "$RESPONSE1" | head -c 500)"
+          echo ""
+          
+          # Test 2: Appointment query (requires tool calling)
+          echo "--- Test 2: Appointment query (tool calling) ---"
+          RESPONSE2=$(curl -sf -X POST http://localhost:8081/generate \
+            -H "Content-Type: application/json" \
+            -d '{"messages": [{"role": "user", "content": "What are the flu shot schedules?"}]}' \
+            --max-time 120 2>&1 || echo "REQUEST_FAILED")
+          echo "Response: $(echo "$RESPONSE2" | head -c 500)"
+          echo ""
+          
+          # Check for errors
+          if echo "$RESPONSE2" | grep -qi "internal error"; then
+            echo ""
+            echo "⚠ DETECTED: Internal error in tool calling response"
+            echo ""
+            echo "=== DETAILED DEBUG LOGS ==="
+            echo ""
+            echo "--- App Server Full Logs (last 200 lines) ---"
+            docker logs app-server-healthcare-assistant --tail 200 2>&1 || true
+            echo ""
+            echo "--- Agent LLM Logs (last 100 lines) ---"
+            docker logs agent-instruct-llm --tail 100 2>&1 || true
+            echo ""
+            echo "--- Environment Variables in App Server ---"
+            docker exec app-server-healthcare-assistant env 2>&1 | grep -v "KEY\|TOKEN\|SECRET\|PASSWORD" || true
+            echo ""
+            echo "Note: Tool calling issue detected. Check if LLM supports tool calling format."
+          else
+            echo "✓ Tool calling test completed (check response for correctness)"
+          fi
+          echo ""
+
       # ==========================================
       # PYTEST: Run in same job to access services
       # ==========================================
@@ -977,17 +1031,28 @@ jobs:
             echo ""
             echo "✗ Tests failed - collecting diagnostic logs..."
             echo ""
-            echo "--- Agent LLM Logs (last 50 lines) ---"
-            docker logs agent-instruct-llm --tail 50 2>&1 || true
+            echo "=========================================="
+            echo "  DIAGNOSTIC LOGS FOR TEST FAILURE"
+            echo "=========================================="
             echo ""
-            echo "--- NemoGuard Content Safety Logs (last 30 lines) ---"
-            docker logs nemoguard-content-safety-llm --tail 30 2>&1 || true
+            echo "--- App Server Logs (last 150 lines) ---"
+            docker logs app-server-healthcare-assistant --tail 150 2>&1 || true
             echo ""
-            echo "--- NemoGuard Topic Control Logs (last 30 lines) ---"
-            docker logs nemoguard-topic-control-llm --tail 30 2>&1 || true
+            echo "--- Agent LLM Logs (last 100 lines) ---"
+            docker logs agent-instruct-llm --tail 100 2>&1 || true
             echo ""
-            echo "--- App Server Logs (last 30 lines) ---"
-            docker logs app-server-healthcare-assistant --tail 30 2>&1 || true
+            echo "--- NemoGuard Content Safety Logs (last 50 lines) ---"
+            docker logs nemoguard-content-safety-llm --tail 50 2>&1 || true
+            echo ""
+            echo "--- NemoGuard Topic Control Logs (last 50 lines) ---"
+            docker logs nemoguard-topic-control-llm --tail 50 2>&1 || true
+            echo ""
+            echo "--- Container Status ---"
+            docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            echo ""
+            echo "--- Network Connectivity Check ---"
+            docker exec app-server-healthcare-assistant curl -sf http://agent-instruct-llm:8000/v1/health/ready 2>&1 || echo "Cannot reach agent-instruct-llm from app-server"
+            echo ""
             exit $PYTEST_EXIT
           fi
           
