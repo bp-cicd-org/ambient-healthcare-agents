@@ -316,14 +316,16 @@ jobs:
           cd ambient-provider/ambient-scribe
           
           # Create .env file for the API
+          # Note: Only NVIDIA_API_KEY is needed (NGC_API_KEY causes Pydantic validation error)
           mkdir -p apps/api
-          cat > apps/api/.env << EOF
-          NVIDIA_API_KEY=${NVIDIA_API_KEY}
-          NGC_API_KEY=${NGC_API_KEY}
-          RIVA_URI=parakeet-nim:50051
-          SELF_HOSTED=true
-          EOF
+          cat > apps/api/.env <<EOF
+NVIDIA_API_KEY=${NVIDIA_API_KEY}
+RIVA_URI=parakeet-nim:50051
+SELF_HOSTED=true
+EOF
           
+          echo "--- apps/api/.env ---"
+          cat apps/api/.env | sed 's/nvapi-.*/nvapi-***/g'
           echo "✓ Environment files configured"
 
       - name: Execute Notebook - ambient-provider.ipynb
@@ -664,6 +666,12 @@ jobs:
           sed -i 's|^AGENT_LLM_BASE_URL=.*|AGENT_LLM_BASE_URL="http://agent-instruct-llm:8000/v1"|g' agent/vars.env || true
           sed -i 's|^AGENT_LLM_MODEL=.*|AGENT_LLM_MODEL="meta/llama-3.3-70b-instruct"|g' agent/vars.env || true
           sed -i 's|^NEMO_GUARDRAILS_CONFIG_PATH=.*|NEMO_GUARDRAILS_CONFIG_PATH=nmgr-config-store/patient-intake-nemoguard-self-hosted-nim|g' agent/vars.env || true
+          
+          # Disable LangSmith tracing in CI (avoids 403 errors without API key)
+          echo "" >> agent/vars.env
+          echo "# Disable LangSmith tracing for CI" >> agent/vars.env
+          echo "LANGCHAIN_TRACING_V2=false" >> agent/vars.env
+          echo "LANGSMITH_TRACING=false" >> agent/vars.env
           
           # Update ace-controller env
           sed -i "s|^NGC_API_KEY=.*|NGC_API_KEY=${NGC_API_KEY}|g" ace-controller-voice-interface/ace_controller.env || true
