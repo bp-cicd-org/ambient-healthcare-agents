@@ -222,26 +222,26 @@ jobs:
           fi
           echo ""
 
-          echo "--- NVIDIA Driver & GPU ---"
-          if ! nvidia-smi; then
-            echo "✗ FATAL: nvidia-smi failed — no GPU driver"; FAIL=1
-          else
+          echo "--- NVIDIA GPU Access ---"
+          if nvidia-smi 2>/dev/null; then
             GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
-            echo "✓ GPU count: $GPU_COUNT"
-            if [ "$GPU_COUNT" -lt 1 ]; then
-              echo "✗ FATAL: No GPUs detected"; FAIL=1
-            fi
-            echo ""
-            echo "GPU details:"
+            echo "✓ GPU count (host): $GPU_COUNT"
             nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv,noheader
+          else
+            echo "nvidia-smi not on host PATH (common for ARC/K8s runners), checking via Docker..."
+            if docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi 2>&1; then
+              echo "✓ GPUs accessible via Docker NVIDIA runtime"
+            else
+              echo "✗ FATAL: Cannot access GPUs — neither host nvidia-smi nor Docker --gpus works"; FAIL=1
+            fi
           fi
           echo ""
 
-          echo "--- Docker Runtime ---"
+          echo "--- Docker NVIDIA Runtime ---"
           if docker info 2>/dev/null | grep -q "nvidia"; then
             echo "✓ NVIDIA Docker runtime available"
           else
-            echo "⚠ WARNING: NVIDIA runtime not detected in docker info (may still work via --gpus)"
+            echo "⚠ WARNING: NVIDIA runtime not shown in docker info"
           fi
           echo ""
 
@@ -396,7 +396,7 @@ jobs:
           done
           echo ""
           echo "=== GPU status ==="
-          nvidia-smi 2>/dev/null || echo "nvidia-smi not available"
+          nvidia-smi 2>/dev/null || docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi 2>/dev/null || echo "GPU status not available"
 
       - name: Wait for Services Ready
         run: |
@@ -553,26 +553,29 @@ jobs:
           fi
           echo ""
 
-          echo "--- NVIDIA Driver & GPU ---"
-          if ! nvidia-smi; then
-            echo "✗ FATAL: nvidia-smi failed — no GPU driver"; FAIL=1
-          else
+          echo "--- NVIDIA GPU Access ---"
+          if nvidia-smi 2>/dev/null; then
             GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
-            echo "✓ GPU count: $GPU_COUNT"
+            echo "✓ GPU count (host): $GPU_COUNT"
             if [ "$GPU_COUNT" -lt 4 ]; then
               echo "✗ FATAL: Need at least 4 GPUs for ambient-patient, found $GPU_COUNT"; FAIL=1
             fi
-            echo ""
-            echo "GPU details:"
             nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv,noheader
+          else
+            echo "nvidia-smi not on host PATH (common for ARC/K8s runners), checking via Docker..."
+            if docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi 2>&1; then
+              echo "✓ GPUs accessible via Docker NVIDIA runtime"
+            else
+              echo "✗ FATAL: Cannot access GPUs — neither host nvidia-smi nor Docker --gpus works"; FAIL=1
+            fi
           fi
           echo ""
 
-          echo "--- Docker Runtime ---"
+          echo "--- Docker NVIDIA Runtime ---"
           if docker info 2>/dev/null | grep -q "nvidia"; then
             echo "✓ NVIDIA Docker runtime available"
           else
-            echo "⚠ WARNING: NVIDIA runtime not detected in docker info (may still work via --gpus)"
+            echo "⚠ WARNING: NVIDIA runtime not shown in docker info"
           fi
           echo ""
 
