@@ -200,25 +200,75 @@ jobs:
           submodules: recursive
 
       # ==========================================
-      # PHASE 1: Environment Setup
+      # PHASE 0: Preflight - fail fast if environment is broken
       # ==========================================
-      - name: Setup Environment
+      - name: Preflight - GPU & Docker Check
         run: |
           echo "========================================"
-          echo "  AMBIENT PROVIDER - ENVIRONMENT SETUP"
+          echo "  PREFLIGHT: GPU & DOCKER CHECKS"
           echo "========================================"
-          
-          # System info
+          FAIL=0
+
+          echo "--- System ---"
           echo "Runner: $(hostname)"
           echo "OS: $(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)"
-          echo "Docker: $(docker --version)"
-          echo ""
-          
-          # GPU info
-          echo "GPU Information:"
-          nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || echo "nvidia-smi not available"
           echo ""
 
+          echo "--- Docker ---"
+          if ! docker --version; then
+            echo "✗ FATAL: Docker not available"; FAIL=1
+          else
+            echo "✓ Docker OK"
+          fi
+          echo ""
+
+          echo "--- NVIDIA Driver & GPU ---"
+          if ! nvidia-smi; then
+            echo "✗ FATAL: nvidia-smi failed — no GPU driver"; FAIL=1
+          else
+            GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+            echo "✓ GPU count: $GPU_COUNT"
+            if [ "$GPU_COUNT" -lt 1 ]; then
+              echo "✗ FATAL: No GPUs detected"; FAIL=1
+            fi
+            echo ""
+            echo "GPU details:"
+            nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv,noheader
+          fi
+          echo ""
+
+          echo "--- Docker Runtime ---"
+          if docker info 2>/dev/null | grep -q "nvidia"; then
+            echo "✓ NVIDIA Docker runtime available"
+          else
+            echo "⚠ WARNING: NVIDIA runtime not detected in docker info (may still work via --gpus)"
+          fi
+          echo ""
+
+          echo "--- Disk Space ---"
+          df -h / | tail -1
+          AVAIL_GB=$(df --output=avail / | tail -1 | awk '{print int($1/1024/1024)}')
+          echo "Available: ${AVAIL_GB}GB"
+          if [ "$AVAIL_GB" -lt 20 ]; then
+            echo "✗ FATAL: Less than 20GB disk space available"; FAIL=1
+          else
+            echo "✓ Disk space OK"
+          fi
+          echo ""
+
+          echo "--- Existing Containers (stale?) ---"
+          docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>/dev/null || true
+          echo ""
+
+          if [ $FAIL -ne 0 ]; then
+            echo "✗ PREFLIGHT FAILED — aborting to save time"
+            exit 1
+          fi
+          echo "✓ All preflight checks passed"
+
+      # ==========================================
+      # PHASE 1: Environment Setup
+      # ==========================================
       - name: Docker Login to NGC
         env:
           NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
@@ -481,25 +531,75 @@ jobs:
           submodules: recursive
 
       # ==========================================
-      # PHASE 1: Environment Setup
+      # PHASE 0: Preflight - fail fast if environment is broken
       # ==========================================
-      - name: Setup Environment
+      - name: Preflight - GPU & Docker Check
         run: |
           echo "========================================"
-          echo "  AMBIENT PATIENT - ENVIRONMENT SETUP"
+          echo "  PREFLIGHT: GPU & DOCKER CHECKS"
           echo "========================================"
-          
-          # System info
+          FAIL=0
+
+          echo "--- System ---"
           echo "Runner: $(hostname)"
           echo "OS: $(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)"
-          echo "Docker: $(docker --version)"
-          echo ""
-          
-          # GPU info
-          echo "GPU Information:"
-          nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || echo "nvidia-smi not available"
           echo ""
 
+          echo "--- Docker ---"
+          if ! docker --version; then
+            echo "✗ FATAL: Docker not available"; FAIL=1
+          else
+            echo "✓ Docker OK"
+          fi
+          echo ""
+
+          echo "--- NVIDIA Driver & GPU ---"
+          if ! nvidia-smi; then
+            echo "✗ FATAL: nvidia-smi failed — no GPU driver"; FAIL=1
+          else
+            GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+            echo "✓ GPU count: $GPU_COUNT"
+            if [ "$GPU_COUNT" -lt 4 ]; then
+              echo "✗ FATAL: Need at least 4 GPUs for ambient-patient, found $GPU_COUNT"; FAIL=1
+            fi
+            echo ""
+            echo "GPU details:"
+            nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv,noheader
+          fi
+          echo ""
+
+          echo "--- Docker Runtime ---"
+          if docker info 2>/dev/null | grep -q "nvidia"; then
+            echo "✓ NVIDIA Docker runtime available"
+          else
+            echo "⚠ WARNING: NVIDIA runtime not detected in docker info (may still work via --gpus)"
+          fi
+          echo ""
+
+          echo "--- Disk Space ---"
+          df -h / | tail -1
+          AVAIL_GB=$(df --output=avail / | tail -1 | awk '{print int($1/1024/1024)}')
+          echo "Available: ${AVAIL_GB}GB"
+          if [ "$AVAIL_GB" -lt 20 ]; then
+            echo "✗ FATAL: Less than 20GB disk space available"; FAIL=1
+          else
+            echo "✓ Disk space OK"
+          fi
+          echo ""
+
+          echo "--- Existing Containers (stale?) ---"
+          docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>/dev/null || true
+          echo ""
+
+          if [ $FAIL -ne 0 ]; then
+            echo "✗ PREFLIGHT FAILED — aborting to save time"
+            exit 1
+          fi
+          echo "✓ All preflight checks passed"
+
+      # ==========================================
+      # PHASE 1: Environment Setup
+      # ==========================================
       - name: Docker Login to NGC
         env:
           NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
