@@ -556,7 +556,7 @@ jobs:
           # Skip cells not compatible with CI environment:
           # - Cell 19, 20, 22: Brev-specific /ephemeral, daemon.json checks
           # - Cell 24: systemctl restart docker
-          # - Cell 27, 32: Hardcoded GPU IDs (6 GPUs) - CI overrides via -e for 5-GPU runner
+          # - Cell 27, 32: Hardcoded GPU IDs (6 GPUs) - CI overrides via -e for 4-GPU runner
           # - Cell 43+: API test calls (deployment is main goal, pytest does testing)
           # - Cell 49-51, 54-59: Turn server setup (not needed for localhost CI)
           # - Cell 68, 70, 72: docker compose down / cleanup commands
@@ -569,9 +569,9 @@ jobs:
             --skip-cells 19 20 22 24 27 32 43 45 47 49 50 51 54 55 56 57 58 59 68 70 72 \
             -e NGC_API_KEY="${NGC_API_KEY}" \
             -e NVIDIA_API_KEY="${NVIDIA_API_KEY}" \
-            -e AGENT_LLM_GPU_ID="0,1,2" \
-            -e NEMOGUARD_CONTENT_SAFETY_LLM_GPU_ID="3" \
-            -e NEMOGUARD_TOPIC_CONTROL_LLM_GPU_ID="4"
+            -e AGENT_LLM_GPU_ID="0,1" \
+            -e NEMOGUARD_CONTENT_SAFETY_LLM_GPU_ID="2" \
+            -e NEMOGUARD_TOPIC_CONTROL_LLM_GPU_ID="3"
           
           echo ""
           echo "✓ Notebook execution completed"
@@ -701,15 +701,31 @@ jobs:
             return 1
           }
 
+          wait_for_container_health() {
+            local name="$1" container="$2" url="$3" max_attempts="$4" attempt=0
+            echo "Checking $name (via docker exec $container)..."
+            while [ $attempt -lt $max_attempts ]; do
+              attempt=$((attempt + 1))
+              if docker exec "$container" curl -sf -o /dev/null "$url" 2>/dev/null; then
+                echo "✓ $name is ready (attempt $attempt/$max_attempts)"
+                return 0
+              fi
+              [ $((attempt % 10)) -eq 0 ] && echo "  Waiting for $name... ($attempt/$max_attempts)"
+              sleep 10
+            done
+            echo "✗ FAILED: $name not ready after $max_attempts attempts"
+            return 1
+          }
+
           FAILED=0
 
-          # Agent LLM NIM health
-          wait_for_endpoint "Agent LLM NIM" "http://localhost:8000/v1/health/ready" 180 || FAILED=1
+          # Agent LLM NIM: port 8000 is NOT exposed to host, check from inside container
+          wait_for_container_health "Agent LLM NIM" "agent-instruct-llm" "http://localhost:8000/v1/health/ready" 180 || FAILED=1
 
-          # App server (Gradio agent UI)
+          # App server (Gradio agent UI) - exposed on host port 8081
           wait_for_endpoint "Agent App Server" "http://localhost:8081" 90 || FAILED=1
 
-          # Voice UI (ace-controller WebRTC)
+          # Voice UI (ace-controller WebRTC) - exposed on host port 4400
           wait_for_endpoint "Voice UI" "http://localhost:4400" 90 || FAILED=1
 
           echo ""
