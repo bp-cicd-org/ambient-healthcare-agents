@@ -705,25 +705,29 @@ jobs:
           }
 
           wait_for_container_health() {
-            local name="$1" container="$2" url="$3" max_attempts="$4" attempt=0
-            echo "Checking $name (via docker exec $container)..."
+            local name="$1" container="$2" max_attempts="$3" attempt=0
+            echo "Checking $name (via docker inspect $container health status)..."
             while [ $attempt -lt $max_attempts ]; do
               attempt=$((attempt + 1))
-              if docker exec "$container" curl -sf -o /dev/null "$url" 2>/dev/null; then
+              local status
+              status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$container" 2>/dev/null || echo "not-found")
+              if [ "$status" = "healthy" ]; then
                 echo "✓ $name is ready (attempt $attempt/$max_attempts)"
                 return 0
               fi
-              [ $((attempt % 10)) -eq 0 ] && echo "  Waiting for $name... ($attempt/$max_attempts)"
+              [ $((attempt % 10)) -eq 0 ] && echo "  Waiting for $name... ($attempt/$max_attempts, status=$status)"
               sleep 10
             done
-            echo "✗ FAILED: $name not ready after $max_attempts attempts"
+            local final_status
+            final_status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$container" 2>/dev/null || echo "not-found")
+            echo "✗ FAILED: $name not ready after $max_attempts attempts (final status=$final_status)"
             return 1
           }
 
           FAILED=0
 
-          # Agent LLM NIM: port 8000 is NOT exposed to host, check from inside container
-          wait_for_container_health "Agent LLM NIM" "agent-instruct-llm" "http://localhost:8000/v1/health/ready" 180 || FAILED=1
+          # Agent LLM NIM: port 8000 is NOT exposed to host; use docker's built-in healthcheck status
+          wait_for_container_health "Agent LLM NIM" "agent-instruct-llm" 180 || FAILED=1
 
           # App server (Gradio agent UI) - exposed on host port 8081
           wait_for_endpoint "Agent App Server" "http://localhost:8081" 90 || FAILED=1
