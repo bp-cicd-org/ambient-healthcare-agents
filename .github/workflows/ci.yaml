@@ -316,6 +316,38 @@ jobs:
           echo "Generated files:"
           ls -la notebook_output/
 
+      - name: Debug - Container Status After Notebook
+        run: |
+          echo "========================================"
+          echo "  DEBUG: POST-NOTEBOOK CONTAINER STATUS"
+          echo "========================================"
+          echo ""
+          echo "=== All containers ==="
+          docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+          echo ""
+          echo "=== Docker networks ==="
+          docker network ls
+          echo ""
+          echo "=== Listening ports on host ==="
+          ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "ss/netstat not available"
+          echo ""
+          echo "=== Docker compose services (if available) ==="
+          cd ambient-provider/ambient-scribe 2>/dev/null && docker compose -f infra/compose.dev.yml --profile riva-nim ps 2>&1 || echo "compose ps not available"
+          cd /home/runner/work/ambient-healthcare-agents/ambient-healthcare-agents 2>/dev/null || true
+          echo ""
+          echo "=== Container logs (last 50 lines each) ==="
+          for c in $(docker ps -a --format '{{.Names}}'); do
+            echo ""
+            echo "════════════════════════════════════════"
+            echo "CONTAINER: $c"
+            echo "════════════════════════════════════════"
+            docker inspect "$c" --format 'Image: {{.Config.Image}} | Status: {{.State.Status}} | Health: {{if .State.Health}}{{.State.Health.Status}}{{else}}N/A{{end}} | Restarts: {{.RestartCount}}' 2>/dev/null || true
+            docker logs --tail 50 "$c" 2>&1 || true
+          done
+          echo ""
+          echo "=== GPU status ==="
+          nvidia-smi 2>/dev/null || echo "nvidia-smi not available"
+
       - name: Wait for Services Ready
         run: |
           echo "========================================"
@@ -331,10 +363,19 @@ jobs:
                 echo "✓ $name is ready (attempt $attempt/$max_attempts)"
                 return 0
               fi
-              [ $((attempt % 10)) -eq 0 ] && echo "  Waiting for $name... ($attempt/$max_attempts)"
+              if [ $((attempt % 10)) -eq 0 ]; then
+                echo "  Waiting for $name... ($attempt/$max_attempts)"
+                echo "  Container status:"
+                docker ps -a --format "  {{.Names}}: {{.Status}}" 2>/dev/null | head -10
+              fi
               sleep 10
             done
             echo "✗ FAILED: $name not ready after $max_attempts attempts"
+            echo "  Container logs for debugging:"
+            for c in $(docker ps -a --format '{{.Names}}'); do
+              echo "  === $c ==="
+              docker logs --tail 20 "$c" 2>&1 | head -20 || true
+            done
             return 1
           }
 
@@ -353,16 +394,10 @@ jobs:
           wait_for_endpoint "Provider API" "http://localhost:8000/docs" 60 || FAILED=1
 
           echo ""
-          echo "Docker containers status:"
+          echo "Final Docker containers status:"
           docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
           if [ $FAILED -ne 0 ]; then
-            echo ""
-            echo "✗ Some services failed to start. Showing container logs..."
-            for c in $(docker ps -a --format '{{.Names}}'); do
-              echo "=== LOGS: $c ==="
-              docker logs --tail 30 "$c" 2>&1 || true
-            done
             exit 1
           fi
 
@@ -697,10 +732,19 @@ jobs:
                 echo "✓ $name is ready (attempt $attempt/$max_attempts)"
                 return 0
               fi
-              [ $((attempt % 10)) -eq 0 ] && echo "  Waiting for $name... ($attempt/$max_attempts)"
+              if [ $((attempt % 10)) -eq 0 ]; then
+                echo "  Waiting for $name... ($attempt/$max_attempts)"
+                echo "  Container status:"
+                docker ps -a --format "  {{.Names}}: {{.Status}}" 2>/dev/null | head -10
+              fi
               sleep 10
             done
             echo "✗ FAILED: $name not ready after $max_attempts attempts"
+            echo "  Container logs for debugging:"
+            for c in $(docker ps -a --format '{{.Names}}'); do
+              echo "  === $c ==="
+              docker logs --tail 20 "$c" 2>&1 | head -20 || true
+            done
             return 1
           }
 
@@ -715,12 +759,21 @@ jobs:
                 echo "✓ $name is ready (attempt $attempt/$max_attempts)"
                 return 0
               fi
-              [ $((attempt % 10)) -eq 0 ] && echo "  Waiting for $name... ($attempt/$max_attempts, status=$status)"
+              if [ $((attempt % 10)) -eq 0 ]; then
+                echo "  Waiting for $name... ($attempt/$max_attempts, status=$status)"
+                echo "  Container status:"
+                docker ps -a --format "  {{.Names}}: {{.Status}}" 2>/dev/null | head -10
+              fi
               sleep 10
             done
             local final_status
             final_status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$container" 2>/dev/null || echo "not-found")
             echo "✗ FAILED: $name not ready after $max_attempts attempts (final status=$final_status)"
+            echo "  Container logs for debugging:"
+            for c in $(docker ps -a --format '{{.Names}}'); do
+              echo "  === $c ==="
+              docker logs --tail 20 "$c" 2>&1 | head -20 || true
+            done
             return 1
           }
 
@@ -736,16 +789,10 @@ jobs:
           wait_for_endpoint "Voice UI" "http://localhost:4400" 90 || FAILED=1
 
           echo ""
-          echo "Docker containers status:"
+          echo "Final Docker containers status:"
           docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
           if [ $FAILED -ne 0 ]; then
-            echo ""
-            echo "✗ Some services failed to start. Showing container logs..."
-            for c in $(docker ps -a --format '{{.Names}}'); do
-              echo "=== LOGS: $c ==="
-              docker logs --tail 30 "$c" 2>&1 || true
-            done
             exit 1
           fi
 
