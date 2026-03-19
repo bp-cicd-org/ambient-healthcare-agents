@@ -340,8 +340,11 @@ jobs:
 
           FAILED=0
 
-          # Riva ASR health (NIM exposes HTTP health on 8001 by default for parakeet)
-          wait_for_endpoint "Riva ASR NIM" "http://localhost:8001/v1/health/ready" 120 || FAILED=1
+          # Riva ASR (parakeet-nim): HTTP on host port 9000, health at /v1/health
+          wait_for_endpoint "Riva ASR NIM" "http://localhost:9000/v1/health" 120 || FAILED=1
+
+          # LLM NIM (llama-3.3-nemotron-super-49b): host port 8001, 49B model needs ~30min to load
+          wait_for_endpoint "LLM NIM" "http://localhost:8001/v1/health" 240 || FAILED=1
 
           # UI frontend
           wait_for_endpoint "Provider UI" "http://localhost:5173" 60 || FAILED=1
