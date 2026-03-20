@@ -431,8 +431,17 @@ jobs:
             echo "UPLOAD_DIR=./uploads"
             echo "TEMPLATES_DIR=./templates"
           } > ambient-provider/ambient-scribe/apps/api/.env
-          echo "✓ API environment pre-configured (cloud mode)"
-          echo "  .env contents (keys only):"
+
+          # UI env file is also required by compose.dev.yml (env_file: ../apps/ui/.env).
+          # bootstrap.sh normally creates it, but if bootstrap fails silently in the
+          # notebook, docker compose up will fail due to missing env_file.
+          mkdir -p ambient-provider/ambient-scribe/apps/ui
+          if [ ! -f "ambient-provider/ambient-scribe/apps/ui/.env" ]; then
+            echo "VITE_USE_STREAMING=true" > ambient-provider/ambient-scribe/apps/ui/.env
+          fi
+
+          echo "✓ API + UI environment pre-configured (cloud mode)"
+          echo "  API .env contents (keys only):"
           grep -oP '^[A-Z_]+' ambient-provider/ambient-scribe/apps/api/.env || true
 
       # ==========================================
