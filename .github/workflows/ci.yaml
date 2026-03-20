@@ -18,7 +18,7 @@
 # SERVICES DEPLOYED (all are real, running containers):
 # --------------------------------
 # Ambient Provider:
-#   - API backend  (FastAPI)          → localhost:8000
+#   - API backend  (FastAPI)          → localhost:8000  (health: /api/health/)
 #   - UI frontend  (Vite/React)      → localhost:5173
 #     Deployed by: `make dev` (notebook cell 40)
 #     Compose file: infra/compose.dev.yml (no --profile riva-nim)
@@ -608,8 +608,8 @@ jobs:
           # UI frontend
           wait_for_endpoint "Provider UI" "http://localhost:5173" 60 || FAILED=1
 
-          # API backend
-          wait_for_endpoint "Provider API" "http://localhost:8000/docs" 60 || FAILED=1
+          # API backend — health endpoint is at /api/health/ (not /docs)
+          wait_for_endpoint "Provider API" "http://localhost:8000/api/health/" 60 || FAILED=1
 
           echo ""
           echo "Final Docker containers status:"
